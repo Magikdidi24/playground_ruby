@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import axios from 'axios';
 import './App.css';
@@ -15,6 +15,177 @@ puts "Plateforme: #{RUBY_PLATFORM}"`);
   const [versionsLoading, setVersionsLoading] = useState(true);
   const [groupedVersions, setGroupedVersions] = useState({});
   const [executionTime, setExecutionTime] = useState(null);
+  
+  // File management states
+  const [currentFilename, setCurrentFilename] = useState("main.rb");
+  const [workspaceId, setWorkspaceId] = useState("default");
+  const [files, setFiles] = useState([]);
+  const [newFilename, setNewFilename] = useState("");
+  const [showNewFileInput, setShowNewFileInput] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef(null);
+
+  // Load workspace files
+  const loadWorkspaceFiles = async () => {
+    try {
+      const res = await axios.get(`/api/workspace/${workspaceId}/files`);
+      if (res.data.success) {
+        setFiles(res.data.files);
+      }
+    } catch (error) {
+      console.error('Erreur lors du chargement des fichiers:', error);
+    }
+  };
+
+  // Load a specific file
+  const loadFile = async (filename) => {
+    try {
+      const res = await axios.get(`/api/workspace/${workspaceId}/file/${filename}`);
+      if (res.data.success) {
+        setCode(res.data.content);
+        setCurrentFilename(filename);
+        setOutput(`Fichier "${filename}" chargé`);
+        setOutputType('info');
+      }
+    } catch (error) {
+      setOutput(`Erreur lors du chargement du fichier: ${error.response?.data?.error || error.message}`);
+      setOutputType('error');
+    }
+  };
+
+  // Upload de fichiers
+  const handleFileUpload = async (event) => {
+    const uploadedFiles = Array.from(event.target.files);
+    
+    if (uploadedFiles.length === 0) return;
+    
+    setIsUploading(true);
+    let successCount = 0;
+    let errorCount = 0;
+    
+    for (const file of uploadedFiles) {
+      if (!file.name.endsWith('.rb')) {
+        alert(`"${file.name}" ignoré : seuls les fichiers .rb sont acceptés`);
+        errorCount++;
+        continue;
+      }
+      
+      try {
+        const content = await file.text();
+        const res = await axios.post('/api/workspace/save', {
+          workspaceId,
+          filename: file.name,
+          content
+        });
+        
+        if (res.data.success) {
+          successCount++;
+        }
+      } catch (error) {
+        console.error(`Erreur upload ${file.name}:`, error);
+        errorCount++;
+      }
+    }
+    
+    setIsUploading(false);
+    loadWorkspaceFiles();
+    
+    if (successCount > 0) {
+      setOutput(`✓ ${successCount} fichier(s) importé(s)`);
+      setOutputType('info');
+    }
+    
+    if (errorCount > 0) {
+      alert(`${errorCount} fichier(s) n'ont pas pu être importés`);
+    }
+    
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Save current file
+  const saveFile = async () => {
+    setIsSaving(true);
+    setSaveMessage("");
+    try {
+      const res = await axios.post('/api/workspace/save', {
+        workspaceId,
+        filename: currentFilename,
+        content: code
+      });
+      
+      if (res.data.success) {
+        setSaveMessage(`✓ ${currentFilename} sauvegardé`);
+        setTimeout(() => setSaveMessage(""), 3000);
+        loadWorkspaceFiles(); // Refresh file list
+      }
+    } catch (error) {
+      setSaveMessage(`✗ Erreur: ${error.response?.data?.error || error.message}`);
+      setOutputType('error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Create new file
+  const createNewFile = async () => {
+    if (!newFilename.trim()) {
+      alert("Veuillez entrer un nom de fichier");
+      return;
+    }
+    
+    const filename = newFilename.endsWith('.rb') ? newFilename : `${newFilename}.rb`;
+    
+    try {
+      const res = await axios.post('/api/workspace/save', {
+        workspaceId,
+        filename,
+        content: "# Nouveau fichier Ruby\n"
+      });
+      
+      if (res.data.success) {
+        setCurrentFilename(filename);
+        setCode("# Nouveau fichier Ruby\n");
+        setNewFilename("");
+        setShowNewFileInput(false);
+        loadWorkspaceFiles();
+        setOutput(`Fichier "${filename}" créé`);
+        setOutputType('info');
+      }
+    } catch (error) {
+      alert(`Erreur: ${error.response?.data?.error || error.message}`);
+    }
+  };
+
+  // Delete file
+  const deleteFile = async (filename) => {
+    if (!confirm(`Voulez-vous vraiment supprimer "${filename}" ?`)) {
+      return;
+    }
+    
+    try {
+      const res = await axios.delete(`/api/workspace/${workspaceId}/file/${filename}`);
+      if (res.data.success) {
+        loadWorkspaceFiles();
+        if (currentFilename === filename) {
+          setCurrentFilename("main.rb");
+          setCode(`puts "Bonjour depuis Ruby!"`);
+        }
+        setOutput(`Fichier "${filename}" supprimé`);
+        setOutputType('info');
+      }
+    } catch (error) {
+      alert(`Erreur: ${error.response?.data?.error || error.message}`);
+    }
+  };
+
+  useEffect(() => {
+    loadWorkspaceFiles();
+  }, [workspaceId]);
 
   useEffect(() => {
     const fetchVersions = async () => {
@@ -80,7 +251,7 @@ puts "Plateforme: #{RUBY_PLATFORM}"`);
       } else {
         errorMessage = error.message;
       }
-      setOutput(`frontend ${errorMessage}\n\nDétails: ${error.message}`);
+      setOutput(`Erreur: ${errorMessage}\n\nDétails: ${error.message}`);
       setOutputType('error');
     } finally {
       setIsRunning(false);
@@ -225,46 +396,153 @@ voiture.afficher`
           </div>
         </div>
 
-        <div className="editor-container">
-          <div className="editor-panel">
-            <div className="panel-header">
-              Source File
+        <div className="main-layout">
+          {/* File Explorer Sidebar */}
+          <div className="file-explorer">
+            <div className="file-explorer-header">
+              <h3>📁 Fichiers</h3>
+              <div className="header-buttons">
+                <button 
+                  className="btn-new-file"
+                  onClick={() => setShowNewFileInput(!showNewFileInput)}
+                  title="Nouveau fichier"
+                >
+                  +
+                </button>
+                <button 
+                  className="btn-upload-file"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                  title="Importer des fichiers .rb"
+                >
+                  {isUploading ? '⏳' : '📤'}
+                </button>
+              </div>
             </div>
-            <Editor
-              height="100%"
-              defaultLanguage="ruby"
-              theme="vs-dark"
-              value={code}
-              onChange={(value) => setCode(value || '')}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 14,
-                lineNumbers: 'on',
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                tabSize: 2,
-                wordWrap: 'on',
-                cursorBlinking: 'smooth',
-                smoothScrolling: true,
-              }}
-            />
-          </div>
 
-          <div className="output-panel">
-            <div className="panel-header">
-              stdout
-              {executionTime && (
-                <span className="execution-badge">{executionTime}</span>
+            {/* Input caché pour l'upload */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".rb"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleFileUpload}
+            />
+
+            {showNewFileInput && (
+              <div className="new-file-input">
+                <input
+                  type="text"
+                  placeholder="nom_fichier.rb"
+                  value={newFilename}
+                  onChange={(e) => setNewFilename(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && createNewFile()}
+                />
+                <button onClick={createNewFile} className="btn-confirm">✓</button>
+                <button onClick={() => {
+                  setShowNewFileInput(false);
+                  setNewFilename("");
+                }} className="btn-cancel">✗</button>
+              </div>
+            )}
+
+            <div className="file-list">
+              {files.length === 0 ? (
+                <div className="no-files">Aucun fichier</div>
+              ) : (
+                files.map(file => (
+                  <div 
+                    key={file}
+                    className={`file-item ${currentFilename === file ? 'active' : ''}`}
+                  >
+                    <span 
+                      className="file-name"
+                      onClick={() => loadFile(file)}
+                    >
+                      📄 {file}
+                    </span>
+                    <button
+                      className="btn-delete-file"
+                      onClick={() => deleteFile(file)}
+                      title="Supprimer"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                ))
               )}
             </div>
-            <pre className={`output output-${outputType}`}>
-              {output}
-            </pre>
+          </div>
+
+          {/* Editor and Output */}
+          <div className="editor-output-container">
+            <div className="file-actions">
+              <div className="current-file-info">
+                <span className="current-file-label">Fichier actuel:</span>
+                <span className="current-file-name">{currentFilename}</span>
+              </div>
+              
+              <div className="file-buttons">
+                {saveMessage && (
+                  <span className={`save-message ${saveMessage.startsWith('✓') ? 'success' : 'error'}`}>
+                    {saveMessage}
+                  </span>
+                )}
+                <button 
+                  className="btn btn-save" 
+                  onClick={saveFile}
+                  disabled={isSaving}
+                >
+                  {isSaving ? '💾 Sauvegarde...' : '💾 Sauvegarder'}
+                </button>
+              </div>
+            </div>
+
+            <div className="editor-container">
+              <div className="editor-panel">
+                <div className="panel-header">
+                  Source File
+                </div>
+                
+                <Editor
+                  height="100%"
+                  defaultLanguage="ruby"
+                  theme="vs-dark"
+                  value={code}
+                  onChange={(value) => setCode(value || '')}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 14,
+                    lineNumbers: 'on',
+                    scrollBeyondLastLine: false,
+                    automaticLayout: true,
+                    tabSize: 2,
+                    wordWrap: 'on',
+                    cursorBlinking: 'smooth',
+                    smoothScrolling: true,
+                  }}
+                />
+              </div>
+
+              <div className="output-panel">
+                <div className="panel-header">
+                  stdout
+                  {executionTime && (
+                    <span className="execution-badge">{executionTime}</span>
+                  )}
+                </div>
+                <pre className={`output output-${outputType}`}>
+                  {output}
+                </pre>
+              </div>
+            </div>
           </div>
         </div>
 
         <footer className="footer">
           <div className="footer-content">
+            Workspace: <strong>{workspaceId}</strong>
           </div>
         </footer>
       </div>
