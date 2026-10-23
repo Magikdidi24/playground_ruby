@@ -29,4 +29,4 @@ export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
 
 It runs whatever code it gets, so it's only meant for localhost. Both servers listen on 127.0.0.1 and the backend refuses any request whose `Host` header isn't localhost, to block DNS rebinding. There is no login and no rate limit, anyone on the machine can use it.
 
-Each run is `ruby -e <code>` in a fresh container as user nobody, with no network, all capabilities dropped, a read-only filesystem except a 16 MB `/tmp`, 256 MB of memory, half a CPU and 64 processes. It gets killed after 15 s or 64 KB of output, and only 2 runs can go at the same time. The containers still share the host kernel, so I wouldn't put this on the internet as it is.
+Each run is `ruby -e <code>` in a fresh container as user nobody, with no network, all capabilities dropped, a read-only root filesystem with a 16 MB `/tmp`, 256 MB of memory, half a CPU and 64 processes. It gets killed after 15 s or 64 KB of output, and only 2 runs can go at the same time. The containers still share the host kernel, so I wouldn't put this on the internet as it is.
