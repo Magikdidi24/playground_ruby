@@ -42,7 +42,7 @@ puts "Plateforme: #{RUBY_PLATFORM}"`);
   // Load a specific file
   const loadFile = async (filename) => {
     try {
-      const res = await axios.get(`/api/workspace/${workspaceId}/file/${filename}`);
+      const res = await axios.get(`/api/workspace/${workspaceId}/file/${encodeURIComponent(filename)}`);
       if (res.data.success) {
         setCode(res.data.content);
         setCurrentFilename(filename);
@@ -139,6 +139,10 @@ puts "Plateforme: #{RUBY_PLATFORM}"`);
     }
     
     const filename = newFilename.endsWith('.rb') ? newFilename : `${newFilename}.rb`;
+    if (files.includes(filename)) {
+      alert(`Le fichier "${filename}" existe déjà`);
+      return;
+    }
     
     try {
       const res = await axios.post('/api/workspace/save', {
@@ -163,17 +167,17 @@ puts "Plateforme: #{RUBY_PLATFORM}"`);
 
   // Delete file
   const deleteFile = async (filename) => {
-    if (!confirm(`Voulez-vous vraiment supprimer "${filename}" ?`)) {
+    if (!window.confirm(`Voulez-vous vraiment supprimer "${filename}" ?`)) {
       return;
     }
     
     try {
-      const res = await axios.delete(`/api/workspace/${workspaceId}/file/${filename}`);
+      const res = await axios.delete(`/api/workspace/${workspaceId}/file/${encodeURIComponent(filename)}`);
       if (res.data.success) {
         loadWorkspaceFiles();
-        if (currentFilename === filename) {
-          setCurrentFilename("main.rb");
-          setCode(`puts "Bonjour depuis Ruby!"`);
+        // Show main.rb's real content, so a later save can't overwrite it with stale editor code.
+        if (currentFilename === filename && filename !== "main.rb") {
+          await loadFile("main.rb");
         }
         setOutput(`Fichier "${filename}" supprimé`);
         setOutputType('info');
@@ -185,6 +189,7 @@ puts "Plateforme: #{RUBY_PLATFORM}"`);
 
   useEffect(() => {
     loadWorkspaceFiles();
+    loadFile(currentFilename); // the editor must start with the saved file, not the sample
   }, [workspaceId]);
 
   useEffect(() => {
@@ -229,12 +234,12 @@ puts "Plateforme: #{RUBY_PLATFORM}"`);
     try {
       const response = await axios.post('/api/execute', { code, version }, { 
         headers: { 'Content-Type': 'application/json' },
-        timeout: 15000
+        timeout: 20000 // the server stops the program after 15s, leave it time to answer
       });
       
       if (response.data.success) {
         setOutput(response.data.output);
-        setOutputType('success');
+        setOutputType(response.data.exitCode ? 'error' : 'success');
         setExecutionTime(response.data.executionTime);
       } else {
         setOutput(response.data.error);
@@ -244,10 +249,10 @@ puts "Plateforme: #{RUBY_PLATFORM}"`);
       let errorMessage = 'Erreur de connexion au serveur';
       if (error.response) {
         errorMessage = error.response.data?.error || error.response.statusText || errorMessage;
-      } else if (error.request) {
-        errorMessage = 'Le serveur ne répond pas. Vérifiez que le backend est démarré sur le port 5000.';
       } else if (error.code === 'ECONNABORTED') {
         errorMessage = 'Timeout: L\'exécution a pris trop de temps (max 15s)';
+      } else if (error.request) {
+        errorMessage = 'Le serveur ne répond pas. Vérifiez que le backend est démarré sur le port 5000.';
       } else {
         errorMessage = error.message;
       }

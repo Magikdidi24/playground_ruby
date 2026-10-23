@@ -7,3 +7,5 @@ backend/node_modules/
 package-lock.json
 .env
 objectif.txt
+# Runtime data (created by the backend)
+backend/workspace/
